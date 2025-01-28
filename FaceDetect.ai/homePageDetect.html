@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face Shape Detection</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="Detect.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+  <script defer src="Detect.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="video-wrapper">
+      <!-- Video Feed and Canvas -->
+      <div class="overlay-container">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas" width="640" height="480"></canvas>
+        <div id="ui-overlay">
+          <div class="oval-guide"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+      <div class="loading-content">
+        <div class="spinner"></div>
+        <p>Processing face... Please wait.</p>
+      </div>
+    </div>
+
+    <!-- Controls and Output -->
+    
+    <p id="result">Face Shape: Not detected</p>
+    <p id="feedback">Feedback: Waiting for input...</p>
+  </div>
+</body>
+</html>
