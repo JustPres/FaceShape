@@ -43,9 +43,15 @@ async function loadModel() {
           solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh'
         }
       );
+      if (!model) {
+        // This case might not be strictly necessary if .load() always throws on failure,
+        // but it's a good safeguard.
+        throw new Error("faceLandmarksDetection.load returned undefined or null");
+      }
     } catch (error) {
       console.error("Model loading failed:", error);
-      feedback.textContent = "Error: Failed to initialize face detection";
+      feedback.textContent = "Error: Failed to initialize face detection. " + error.message;
+      throw error; // Re-throw the error to be caught by the main try/catch
     }
   }
 // Real-time detection loop
@@ -54,6 +60,15 @@ async function detectionLoop() {
 
   isProcessing = true;
   try {
+    // Defensive check: Ensure model is loaded before trying to use it.
+    if (!model) {
+      console.error("detectionLoop: Attempted to run detection, but model is not loaded!");
+      feedback.textContent = "Error: Face detection model not available. Please refresh.";
+      isProcessing = false;
+      requestAnimationFrame(detectionLoop); // Still request next frame to potentially recover if model loads later
+      return;
+    }
+
     ctx.save();
     ctx.scale(-1, 1); // Mirror video feed
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
@@ -141,5 +156,20 @@ function distance(p1, p2) {
     detectionLoop(); // Start real-time detection
   } catch (error) {
     console.error("Initialization failed:", error);
+    // Display a more user-friendly and specific message on the page
+    if (error.message.toLowerCase().includes("camera access denied")) {
+      feedback.textContent = "Camera access was denied. Please enable camera permissions in your browser settings and refresh.";
+    } else if (error.message.toLowerCase().includes("model loading failed") || error.message.toLowerCase().includes("initialize face detection")) {
+      // The specific error from loadModel is already set to feedback.textContent,
+      // but we can add a general prefix or ensure it's not overwritten by a generic one.
+      feedback.textContent = "Error initializing application: " + feedback.textContent; // Keep existing specific model error
+    } else {
+      feedback.textContent = "Application failed to start. Error: " + error.message + ". Please try again or check console.";
+    }
+    // Optionally, hide loading indicators or show an error state in the UI
+    const loadingScreen = document.getElementById("loading-screen");
+    if (loadingScreen) {
+        loadingScreen.style.visibility = "hidden";
+    }
   }
 })();
