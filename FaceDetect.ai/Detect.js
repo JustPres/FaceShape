@@ -1,6 +1,6 @@
 // ========= START: Copy everything below this line =========
 
-// Detect.js - FINAL CORRECTED VERSION
+// Detect.js - FINAL CORRECTED DRAWING LOGIC
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -61,8 +61,10 @@ async function loadModel() {
 function drawLandmarks(landmarks) {
   ctx.fillStyle = 'rgba(0, 255, 150, 0.7)';
   for (const landmark of landmarks) {
+    // Manually mirror the X coordinate for drawing
+    const mirroredX = canvas.width - landmark.x;
     ctx.beginPath();
-    ctx.arc(landmark.x, landmark.y, 2, 0, 2 * Math.PI);
+    ctx.arc(mirroredX, landmark.y, 2, 0, 2 * Math.PI);
     ctx.fill();
   }
 }
@@ -75,15 +77,14 @@ function drawGuide(isFaceDetected) {
   const radiusY = 200;
   ctx.strokeStyle = isFaceDetected ? 'rgba(0, 255, 0, 0.7)' : 'rgba(255, 0, 0, 0.5)';
   ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, 2 * Math.PI);
-  ctx.stroke();
   if (isFaceDetected) {
     ctx.shadowColor = 'rgba(0, 255, 0, 0.7)';
     ctx.shadowBlur = 20;
   } else {
     ctx.shadowBlur = 0;
   }
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, 2 * Math.PI);
   ctx.stroke();
   ctx.shadowBlur = 0;
 }
@@ -98,13 +99,18 @@ async function detectionLoop() {
       return;
     }
     const predictions = await model.estimateFaces(video, { flipHorizontal: false });
+
+    // 1. Clear the canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Draw the mirrored video feed
     ctx.save();
     ctx.scale(-1, 1);
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
+
     const isFaceDetected = predictions.length > 0;
-    drawGuide(isFaceDetected);
+
     if (isFaceDetected) {
       noFaceCounter = 0;
       const landmarks = predictions[0].keypoints;
@@ -112,7 +118,10 @@ async function detectionLoop() {
         console.error("Prediction object does not contain keypoints:", predictions[0]);
         return;
       }
+
+      // 3. Draw the landmarks on the non-mirrored canvas, but mirror their X coordinates manually
       drawLandmarks(landmarks);
+
       updateAlignmentFeedback(landmarks);
       updateFaceShape(predictions);
     } else {
@@ -125,6 +134,10 @@ async function detectionLoop() {
       }
       recentShapes = [];
     }
+
+    // 4. Draw the guide on top of everything
+    drawGuide(isFaceDetected);
+
   } catch (error) {
     console.error("Detection error:", error);
   }
@@ -142,12 +155,13 @@ function updateDisplayedShape() {
   result.textContent = `Face Shape: ${mostFrequentShape}`;
 }
 
-// CORRECTED: This function no longer interacts with the non-existent ovalGuide element
 function updateAlignmentFeedback(landmarks) {
   const noseTip = landmarks[4];
+  // Manually mirror the X coordinate for alignment check
+  const mirroredX = canvas.width - noseTip.x;
   const faceCenterX = canvas.width / 2;
   const faceCenterY = canvas.height / 2;
-  const xOffset = Math.abs(noseTip.x - faceCenterX);
+  const xOffset = Math.abs(mirroredX - faceCenterX);
   const yOffset = Math.abs(noseTip.y - faceCenterY);
   if (xOffset < 50 && yOffset < 75) {
     feedback.textContent = "Face aligned! Analyzing...";
@@ -158,6 +172,7 @@ function updateAlignmentFeedback(landmarks) {
 
 function updateFaceShape(predictions) {
   const landmarks = predictions[0].keypoints;
+  // Since all measurements are relative distances, mirroring doesn't affect them.
   const JAWLINE_INDICES = [234, 93, 132, 58, 172, 136, 149, 148, 152, 377, 400, 378, 379, 365, 397, 288];
   const CHEEKBONE_L = 116;
   const CHEEKBONE_R = 345;
