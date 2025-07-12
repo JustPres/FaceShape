@@ -1,4 +1,3 @@
-// Detect.js - Updated Version
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -31,29 +30,31 @@ async function setupCamera() {
 
 // Load the face detection model
 async function loadModel() {
-    try {
-      // Wait for TensorFlow.js to be ready
-      await tf.ready();
-      
-      model = await faceLandmarksDetection.load(
-        faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
-        { 
-          maxFaces: 1,
-          runtime: 'mediapipe',
-          solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh'
-        }
-      );
-      if (!model) {
-        // This case might not be strictly necessary if .load() always throws on failure,
-        // but it's a good safeguard.
-        throw new Error("faceLandmarksDetection.load returned undefined or null");
-      }
-    } catch (error) {
-      console.error("Model loading failed:", error);
-      feedback.textContent = "Error: Failed to initialize face detection. " + error.message;
-      throw error; // Re-throw the error to be caught by the main try/catch
+  try {
+    // Wait for TensorFlow.js to be ready
+    await tf.ready();
+
+    // Use the modern createDetector API
+    const modelConfig = {
+      runtime: 'mediapipe',
+      solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh',
+      maxFaces: 1
+    };
+    model = await faceLandmarksDetection.createDetector(
+      faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+      modelConfig
+    );
+
+    if (!model) {
+      throw new Error("createDetector returned undefined or null");
     }
+  } catch (error) {
+    console.error("Model loading failed:", error);
+    feedback.textContent = "Error: Failed to initialize face detection. " + error.message;
+    throw error; // Re-throw the error
   }
+}
+
 // Real-time detection loop
 async function detectionLoop() {
   if (!model || isProcessing) return;
@@ -65,7 +66,7 @@ async function detectionLoop() {
       console.error("detectionLoop: Attempted to run detection, but model is not loaded!");
       feedback.textContent = "Error: Face detection model not available. Please refresh.";
       isProcessing = false;
-      requestAnimationFrame(detectionLoop); // Still request next frame to potentially recover if model loads later
+      requestAnimationFrame(detectionLoop);
       return;
     }
 
@@ -74,14 +75,18 @@ async function detectionLoop() {
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
 
-    const predictions = await model.estimateFaces({
-      input: canvas,
-      predictIrises: false,
+    // The new API uses estimateFaces on the detector object
+    const predictions = await model.estimateFaces(video, {
       flipHorizontal: false
     });
 
     if (predictions.length > 0) {
-      const landmarks = predictions[0].scaledMesh;
+      // The structure of the prediction is different, it has a `keypoints` property
+      const landmarks = predictions[0].keypoints;
+      if (!landmarks) {
+        console.error("Prediction object does not contain keypoints:", predictions[0]);
+        return;
+      }
       updateAlignmentFeedback(landmarks);
       updateFaceShape(landmarks);
     } else {
@@ -98,14 +103,14 @@ async function detectionLoop() {
 
 // Update alignment feedback
 function updateAlignmentFeedback(landmarks) {
+  // The keypoints from the new API have x, y, z properties.
   const noseTip = landmarks[4];
   const faceCenterX = canvas.width / 2;
   const faceCenterY = canvas.height / 2;
-  
-  // Calculate distance from center
-  const xOffset = Math.abs(noseTip[0] - faceCenterX);
-  const yOffset = Math.abs(noseTip[1] - faceCenterY);
-  
+
+  const xOffset = Math.abs(noseTip.x - faceCenterX);
+  const yOffset = Math.abs(noseTip.y - faceCenterY);
+
   if (xOffset < 50 && yOffset < 75) {
     ovalGuide.classList.add("detected");
     feedback.textContent = "Face aligned! Analyzing...";
@@ -119,9 +124,9 @@ function updateAlignmentFeedback(landmarks) {
 function updateFaceShape(landmarks) {
   const JAWLINE_INDICES = [234, 93, 132, 58, 172, 136, 149, 148, 152, 377, 400, 378, 379, 365, 397, 288];
   const jawPoints = JAWLINE_INDICES.map(i => landmarks[i]);
-  
-  // Calculate face metrics
-  const faceWidth = Math.max(...jawPoints.map(p => p[0])) - Math.min(...jawPoints.map(p => p[0]));
+
+  // Calculate face metrics using .x and .y properties
+  const faceWidth = Math.max(...jawPoints.map(p => p.x)) - Math.min(...jawPoints.map(p => p.x));
   const faceHeight = distance(landmarks[10], landmarks[152]);
   const jawWidth = distance(jawPoints[0], jawPoints[jawPoints.length - 1]);
   const foreheadWidth = distance(landmarks[234], landmarks[454]);
@@ -129,22 +134,23 @@ function updateFaceShape(landmarks) {
   // Determine shape
   let shape = "Oval";
   const ratio = faceHeight / faceWidth;
-  
-  if (ratio < 1.1 && jawWidth/foreheadWidth > 0.9) {
+
+  if (ratio < 1.1 && jawWidth / foreheadWidth > 0.9) {
     shape = "Round";
-  } else if (jawWidth/foreheadWidth > 0.95) {
+  } else if (jawWidth / foreheadWidth > 0.95) {
     shape = "Square";
-  } else if (foreheadWidth/jawWidth > 1.15) {
+  } else if (foreheadWidth / jawWidth > 1.15) {
     shape = "Heart";
   } else if (ratio > 1.4) {
     shape = "Oblong";
   }
-  
+
   result.textContent = `Face Shape: ${shape}`;
 }
 
 function distance(p1, p2) {
-  return Math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2);
+  // The points now have .x and .y properties
+  return Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
 }
 
 // Initialize app
@@ -160,7 +166,7 @@ function distance(p1, p2) {
     if (error.message.toLowerCase().includes("camera access denied")) {
       feedback.textContent = "Camera access was denied. Please enable camera permissions in your browser settings and refresh.";
     } else if (error.message.toLowerCase().includes("model loading failed") || error.message.toLowerCase().includes("initialize face detection")) {
-      // The specific error from loadModel is already set to feedback.textContent,
+      // The specific error from loadModel is already set to feedback.textContent, 
       // but we can add a general prefix or ensure it's not overwritten by a generic one.
       feedback.textContent = "Error initializing application: " + feedback.textContent; // Keep existing specific model error
     } else {
@@ -169,7 +175,7 @@ function distance(p1, p2) {
     // Optionally, hide loading indicators or show an error state in the UI
     const loadingScreen = document.getElementById("loading-screen");
     if (loadingScreen) {
-        loadingScreen.style.visibility = "hidden";
+      loadingScreen.style.visibility = "hidden";
     }
   }
 })();
