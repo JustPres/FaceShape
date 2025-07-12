@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Face Shape Detection</title>
   <link rel="stylesheet" href="FaceDetect.ai/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+
+  <!-- Load the all-in-one bundle for the model -->
+  <!-- This bundle should include tfjs-core, the model, and backends -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection/dist/face-landmarks-detection.js"></script>
+
   <script defer src="FaceDetect.ai/Detect.js"></script>
 </head>
 <body>
