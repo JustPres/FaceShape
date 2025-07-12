@@ -12,6 +12,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.10.0/dist/tf-converter.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.2/dist/face-landmarks-detection.min.js"></script>
 
+  <!-- Diagnostic script to check for tf object -->
+  <script>
+    if (window.tf) {
+      console.log('DIAGNOSTIC: tf object IS defined. Version: ' + window.tf.version.tfjs);
+    } else {
+      console.error('DIAGNOSTIC: tf object IS NOT defined immediately after script load.');
+    }
+  </script>
+
   <script defer src="FaceDetect.ai/Detect.js"></script>
 </head>
 <body>
