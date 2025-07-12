@@ -1,3 +1,6 @@
+// ========= START: Copy everything below this line =========
+
+// Detect.js - CORRECTED VERSION WITH STABILITY ENHANCEMENT
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -6,6 +9,8 @@ const feedback = document.getElementById("feedback");
 const result = document.getElementById("result");
 let model;
 let isProcessing = false;
+let recentShapes = []; // For stability
+const SHAPE_HISTORY_SIZE = 30; // Number of frames to average over
 
 // Setup camera
 async function setupCamera() {
@@ -61,38 +66,36 @@ async function detectionLoop() {
 
   isProcessing = true;
   try {
-    // Defensive check: Ensure model is loaded before trying to use it.
-    if (!model) {
-      console.error("detectionLoop: Attempted to run detection, but model is not loaded!");
-      feedback.textContent = "Error: Face detection model not available. Please refresh.";
-      isProcessing = false;
+    if (video.paused || video.ended || video.readyState < 3) {
       requestAnimationFrame(detectionLoop);
       return;
     }
 
-    ctx.save();
-    ctx.scale(-1, 1); // Mirror video feed
-    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-    ctx.restore();
-
-    // The new API uses estimateFaces on the detector object
     const predictions = await model.estimateFaces(video, {
       flipHorizontal: false
     });
 
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    ctx.restore();
+
     if (predictions.length > 0) {
-      // The structure of the prediction is different, it has a `keypoints` property
       const landmarks = predictions[0].keypoints;
       if (!landmarks) {
         console.error("Prediction object does not contain keypoints:", predictions[0]);
         return;
       }
       updateAlignmentFeedback(landmarks);
-      updateFaceShape(landmarks);
+      // Pass the whole prediction object to updateFaceShape
+      updateFaceShape(predictions);
     } else {
       ovalGuide.classList.remove("detected");
       result.textContent = "Face Shape: No face detected";
       feedback.textContent = "Please position your face within the frame";
+      // Clear the history when no face is detected
+      recentShapes = [];
     }
   } catch (error) {
     console.error("Detection error:", error);
@@ -101,9 +104,24 @@ async function detectionLoop() {
   requestAnimationFrame(detectionLoop);
 }
 
+function updateDisplayedShape() {
+  if (recentShapes.length === 0) {
+    return;
+  }
+  // Count occurrences of each shape
+  const shapeCounts = recentShapes.reduce((acc, shape) => {
+    acc[shape] = (acc[shape] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Find the most frequent shape
+  const mostFrequentShape = Object.keys(shapeCounts).reduce((a, b) => shapeCounts[a] > shapeCounts[b] ? a : b);
+
+  result.textContent = `Face Shape: ${mostFrequentShape}`;
+}
+
 // Update alignment feedback
 function updateAlignmentFeedback(landmarks) {
-  // The keypoints from the new API have x, y, z properties.
   const noseTip = landmarks[4];
   const faceCenterX = canvas.width / 2;
   const faceCenterY = canvas.height / 2;
@@ -121,17 +139,16 @@ function updateAlignmentFeedback(landmarks) {
 }
 
 // Face shape calculation
-function updateFaceShape(landmarks) {
+function updateFaceShape(predictions) {
+  const landmarks = predictions[0].keypoints;
   const JAWLINE_INDICES = [234, 93, 132, 58, 172, 136, 149, 148, 152, 377, 400, 378, 379, 365, 397, 288];
   const jawPoints = JAWLINE_INDICES.map(i => landmarks[i]);
 
-  // Calculate face metrics using .x and .y properties
   const faceWidth = Math.max(...jawPoints.map(p => p.x)) - Math.min(...jawPoints.map(p => p.x));
   const faceHeight = distance(landmarks[10], landmarks[152]);
   const jawWidth = distance(jawPoints[0], jawPoints[jawPoints.length - 1]);
   const foreheadWidth = distance(landmarks[234], landmarks[454]);
 
-  // Determine shape
   let shape = "Oval";
   const ratio = faceHeight / faceWidth;
 
@@ -145,11 +162,18 @@ function updateFaceShape(landmarks) {
     shape = "Oblong";
   }
 
-  result.textContent = `Face Shape: ${shape}`;
+  // Add the detected shape to our history
+  recentShapes.push(shape);
+  // If the history is too long, remove the oldest entry
+  if (recentShapes.length > SHAPE_HISTORY_SIZE) {
+    recentShapes.shift();
+  }
+
+  // Update the displayed shape based on the history
+  updateDisplayedShape();
 }
 
 function distance(p1, p2) {
-  // The points now have .x and .y properties
   return Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
 }
 
@@ -159,23 +183,9 @@ function distance(p1, p2) {
     await setupCamera();
     await loadModel();
     video.play();
-    detectionLoop(); // Start real-time detection
+    detectionLoop();
   } catch (error) {
     console.error("Initialization failed:", error);
-    // Display a more user-friendly and specific message on the page
-    if (error.message.toLowerCase().includes("camera access denied")) {
-      feedback.textContent = "Camera access was denied. Please enable camera permissions in your browser settings and refresh.";
-    } else if (error.message.toLowerCase().includes("model loading failed") || error.message.toLowerCase().includes("initialize face detection")) {
-      // The specific error from loadModel is already set to feedback.textContent, 
-      // but we can add a general prefix or ensure it's not overwritten by a generic one.
-      feedback.textContent = "Error initializing application: " + feedback.textContent; // Keep existing specific model error
-    } else {
-      feedback.textContent = "Application failed to start. Error: " + error.message + ". Please try again or check console.";
-    }
-    // Optionally, hide loading indicators or show an error state in the UI
-    const loadingScreen = document.getElementById("loading-screen");
-    if (loadingScreen) {
-      loadingScreen.style.visibility = "hidden";
-    }
+    feedback.textContent = "Application failed to start. Error: " + error.message + ". Please try again or check console.";
   }
 })();
