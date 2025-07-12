@@ -1,16 +1,17 @@
 // ========= START: Copy everything below this line =========
 
-// Detect.js - CORRECTED VERSION WITH STABILITY ENHANCEMENT
+// Detect.js - FINAL CORRECTED VERSION
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-const ovalGuide = document.querySelector(".oval-guide");
 const feedback = document.getElementById("feedback");
 const result = document.getElementById("result");
 let model;
 let isProcessing = false;
-let recentShapes = []; // For stability
-const SHAPE_HISTORY_SIZE = 30; // Number of frames to average over
+let recentShapes = [];
+const SHAPE_HISTORY_SIZE = 30;
+let noFaceCounter = 0;
+const NO_FACE_THRESHOLD = 150;
 
 // Setup camera
 async function setupCamera() {
@@ -36,10 +37,7 @@ async function setupCamera() {
 // Load the face detection model
 async function loadModel() {
   try {
-    // Wait for TensorFlow.js to be ready
     await tf.ready();
-
-    // Use the modern createDetector API
     const modelConfig = {
       runtime: 'mediapipe',
       solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh',
@@ -49,52 +47,82 @@ async function loadModel() {
       faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
       modelConfig
     );
-
     if (!model) {
       throw new Error("createDetector returned undefined or null");
     }
   } catch (error) {
     console.error("Model loading failed:", error);
     feedback.textContent = "Error: Failed to initialize face detection. " + error.message;
-    throw error; // Re-throw the error
+    throw error;
   }
+}
+
+// Function to draw the landmarks
+function drawLandmarks(landmarks) {
+  ctx.fillStyle = 'rgba(0, 255, 150, 0.7)';
+  for (const landmark of landmarks) {
+    ctx.beginPath();
+    ctx.arc(landmark.x, landmark.y, 2, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
+// Function to draw the oval guide
+function drawGuide(isFaceDetected) {
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  const radiusX = 150;
+  const radiusY = 200;
+  ctx.strokeStyle = isFaceDetected ? 'rgba(0, 255, 0, 0.7)' : 'rgba(255, 0, 0, 0.5)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, 2 * Math.PI);
+  ctx.stroke();
+  if (isFaceDetected) {
+    ctx.shadowColor = 'rgba(0, 255, 0, 0.7)';
+    ctx.shadowBlur = 20;
+  } else {
+    ctx.shadowBlur = 0;
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
 }
 
 // Real-time detection loop
 async function detectionLoop() {
   if (!model || isProcessing) return;
-
   isProcessing = true;
   try {
     if (video.paused || video.ended || video.readyState < 3) {
       requestAnimationFrame(detectionLoop);
       return;
     }
-
-    const predictions = await model.estimateFaces(video, {
-      flipHorizontal: false
-    });
-
+    const predictions = await model.estimateFaces(video, { flipHorizontal: false });
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.scale(-1, 1);
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
-
-    if (predictions.length > 0) {
+    const isFaceDetected = predictions.length > 0;
+    drawGuide(isFaceDetected);
+    if (isFaceDetected) {
+      noFaceCounter = 0;
       const landmarks = predictions[0].keypoints;
       if (!landmarks) {
         console.error("Prediction object does not contain keypoints:", predictions[0]);
         return;
       }
+      drawLandmarks(landmarks);
       updateAlignmentFeedback(landmarks);
-      // Pass the whole prediction object to updateFaceShape
       updateFaceShape(predictions);
     } else {
-      ovalGuide.classList.remove("detected");
+      noFaceCounter++;
       result.textContent = "Face Shape: No face detected";
-      feedback.textContent = "Please position your face within the frame";
-      // Clear the history when no face is detected
+      if (noFaceCounter > NO_FACE_THRESHOLD) {
+        feedback.textContent = "Detection difficult. Please find a brighter area.";
+      } else {
+        feedback.textContent = "Please position your face within the frame";
+      }
       recentShapes = [];
     }
   } catch (error) {
@@ -105,71 +133,61 @@ async function detectionLoop() {
 }
 
 function updateDisplayedShape() {
-  if (recentShapes.length === 0) {
-    return;
-  }
-  // Count occurrences of each shape
+  if (recentShapes.length === 0) return;
   const shapeCounts = recentShapes.reduce((acc, shape) => {
     acc[shape] = (acc[shape] || 0) + 1;
     return acc;
   }, {});
-
-  // Find the most frequent shape
   const mostFrequentShape = Object.keys(shapeCounts).reduce((a, b) => shapeCounts[a] > shapeCounts[b] ? a : b);
-
   result.textContent = `Face Shape: ${mostFrequentShape}`;
 }
 
-// Update alignment feedback
+// CORRECTED: This function no longer interacts with the non-existent ovalGuide element
 function updateAlignmentFeedback(landmarks) {
   const noseTip = landmarks[4];
   const faceCenterX = canvas.width / 2;
   const faceCenterY = canvas.height / 2;
-
   const xOffset = Math.abs(noseTip.x - faceCenterX);
   const yOffset = Math.abs(noseTip.y - faceCenterY);
-
   if (xOffset < 50 && yOffset < 75) {
-    ovalGuide.classList.add("detected");
     feedback.textContent = "Face aligned! Analyzing...";
   } else {
-    ovalGuide.classList.remove("detected");
     feedback.textContent = "Center your face in the oval";
   }
 }
 
-// Face shape calculation
 function updateFaceShape(predictions) {
   const landmarks = predictions[0].keypoints;
   const JAWLINE_INDICES = [234, 93, 132, 58, 172, 136, 149, 148, 152, 377, 400, 378, 379, 365, 397, 288];
+  const CHEEKBONE_L = 116;
+  const CHEEKBONE_R = 345;
+  const FOREHEAD_L = 234;
+  const FOREHEAD_R = 454;
+  const FACE_TOP = 10;
+  const FACE_BOTTOM = 152;
   const jawPoints = JAWLINE_INDICES.map(i => landmarks[i]);
-
-  const faceWidth = Math.max(...jawPoints.map(p => p.x)) - Math.min(...jawPoints.map(p => p.x));
-  const faceHeight = distance(landmarks[10], landmarks[152]);
-  const jawWidth = distance(jawPoints[0], jawPoints[jawPoints.length - 1]);
-  const foreheadWidth = distance(landmarks[234], landmarks[454]);
-
+  const faceHeight = distance(landmarks[FACE_TOP], landmarks[FACE_BOTTOM]);
+  const foreheadWidth = distance(landmarks[FOREHEAD_L], landmarks[FOREHEAD_R]);
+  const cheekboneWidth = distance(landmarks[CHEEKBONE_L], landmarks[CHEEKBONE_R]);
+  const jawWidth = Math.max(...jawPoints.map(p => p.x)) - Math.min(...jawPoints.map(p => p.x));
   let shape = "Oval";
-  const ratio = faceHeight / faceWidth;
-
-  if (ratio < 1.1 && jawWidth / foreheadWidth > 0.9) {
-    shape = "Round";
-  } else if (jawWidth / foreheadWidth > 0.95) {
-    shape = "Square";
-  } else if (foreheadWidth / jawWidth > 1.15) {
-    shape = "Heart";
-  } else if (ratio > 1.4) {
+  const faceWidth = Math.max(foreheadWidth, cheekboneWidth, jawWidth);
+  const faceHeightToWidthRatio = faceHeight / faceWidth;
+  if (faceHeightToWidthRatio > 1.5) {
     shape = "Oblong";
+  } else if (Math.abs(cheekboneWidth - jawWidth) < cheekboneWidth * 0.05 && Math.abs(foreheadWidth - jawWidth) < foreheadWidth * 0.05) {
+    shape = "Square";
+  } else if (foreheadWidth > cheekboneWidth && cheekboneWidth > jawWidth) {
+    shape = "Heart";
+  } else if (cheekboneWidth > foreheadWidth && cheekboneWidth > jawWidth) {
+    shape = "Round";
+  } else if (faceHeightToWidthRatio > 1.2) {
+    shape = "Oval";
   }
-
-  // Add the detected shape to our history
   recentShapes.push(shape);
-  // If the history is too long, remove the oldest entry
   if (recentShapes.length > SHAPE_HISTORY_SIZE) {
     recentShapes.shift();
   }
-
-  // Update the displayed shape based on the history
   updateDisplayedShape();
 }
 
@@ -177,7 +195,6 @@ function distance(p1, p2) {
   return Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
 }
 
-// Initialize app
 (async function main() {
   try {
     await setupCamera();
